@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kişisel Video İndirici</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-800">
+  <div class="min-h-screen flex items-center justify-center p-4">
+    <div class="max-w-3xl w-full space-y-6">
+
+      <h1 class="text-3xl font-bold text-center text-indigo-600">🎥 Kişisel Video İndirici</h1>
+      <p class="text-center text-gray-600">TikTok, Twitter (X) ve beyaz listedeki alanlardan video indirmek için basit ve modern bir araç.</p>
+
+      <!-- Genel İndirme Formu -->
+      <form id="form-general" class="bg-white rounded-2xl shadow-md p-6 space-y-4">
+        <h2 class="text-xl font-semibold text-gray-700">📂 Genel Dosya İndir (Beyaz Liste)</h2>
+        <input id="url" type="url" placeholder="https://archive.org/..." required
+          class="w-full border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+
+        <label class="flex items-center space-x-2 text-sm text-gray-600">
+          <input id="attest" type="checkbox" required class="h-4 w-4 text-indigo-500" />
+          <span>İndirme hakkım olduğunu onaylıyorum</span>
+        </label>
+
+        <button type="submit" class="w-full bg-indigo-500 text-white py-2 rounded-lg hover:bg-indigo-600 transition">
+          İndir
+        </button>
+        <div id="msg" class="text-sm text-gray-600"></div>
+      </form>
+
+      <!-- Twitter İndirme Formu -->
+      <form id="form-x" class="bg-white rounded-2xl shadow-md p-6 space-y-4">
+        <h2 class="text-xl font-semibold text-gray-700">🐦 Twitter (X) Video İndir</h2>
+        <input id="urlX" type="url" placeholder="https://x.com/.../status/..." required
+          class="w-full border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+
+        <label class="flex items-center space-x-2 text-sm text-gray-600">
+          <input id="attestX" type="checkbox" required class="h-4 w-4 text-blue-500" />
+          <span>İndirme hakkım olduğunu onaylıyorum</span>
+        </label>
+
+        <button type="submit" class="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition">
+          X Videosunu İndir
+        </button>
+        <div id="msgX" class="text-sm text-gray-600"></div>
+      </form>
+
+      <p class="text-center text-xs text-gray-400">⚠️ Bu proje kişisel kullanım için geliştirilmiştir.</p>
+    </div>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
