@@ -1,0 +1,291 @@
+# Proje yapısı
+
+```
+indirici/
+├─ package.json
+├─ server.js
+├─ .env                 # (opsiyonel) PORT, ALLOWLIST
+├─ public/
+│  ├─ index.html
+│  ├─ main.js
+│  └─ style.css
+```
+
+---
+
+## package.json
+```json
+{
+  "name": "beyaz-listeli-indirici",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js"
+  },
+  "dependencies": {
+    "compression": "^1.7.4",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "node-fetch": "^3.3.2",
+    "rate-limiter-flexible": "^5.0.0"
+  }
+}
+```
+
+---
+
+## server.js
+```js
+import express from "express";
+import fetch from "node-fetch";
+import helmet from "helmet";
+import compression from "compression";
+import morgan from "morgan";
+import { URL } from "url";
+import dotenv from "dotenv";
+import { RateLimiterMemory } from "rate-limiter-flexible";
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Beyaz listeyi .env'den de yönetebilirsin: ALLOWLIST=archive.org,example.com,data.gov.tr
+const ENV_ALLOWLIST = (process.env.ALLOWLIST || "").split(",").map(s => s.trim()).filter(Boolean);
+const DEFAULT_ALLOWLIST = ["archive.org", "example.com", "data.gov.tr"]; // örnekler
+const ALLOWLIST = ENV_ALLOWLIST.length ? ENV_ALLOWLIST : DEFAULT_ALLOWLIST;
+
+// Güvenlik ve performans
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+app.use(compression());
+app.use(express.json({ limit: "200kb" }));
+app.use(express.urlencoded({ extended: true }));
+app.use(morgan("tiny"));
+
+// Basit oran sınırlama (IP başına 30 istek/5dk)
+const rateLimiter = new RateLimiterMemory({ points: 30, duration: 300 });
+app.use(async (req, res, next) => {
+  try {
+    await rateLimiter.consume(req.ip);
+    next();
+  } catch {
+    res.status(429).json({ error: "Çok fazla istek. Lütfen biraz bekleyin." });
+  }
+});
+
+// Statik dosyalar (frontend)
+app.use(express.static("public"));
+
+// Basit domain kontrol yardımcısı
+function isHostAllowed(inputUrl) {
+  try {
+    const u = new URL(inputUrl);
+    return ALLOWLIST.some(allowed => u.hostname === allowed || u.hostname.endsWith(`.${allowed}`));
+  } catch {
+    return false;
+  }
+}
+
+app.get("/allowlist", (_, res) => res.json({ allowlist: ALLOWLIST }));
+
+app.post("/download", async (req, res) => {
+  try {
+    const { url } = req.body || {};
+    const attested = req.headers["x-rights-attestation"] === "true";
+
+    if (!url) return res.status(400).json({ error: "URL gerekli." });
+    if (!attested) return res.status(412).json({ error: "İndirme hakkın olduğunu onaylamalısın." });
+    if (!isHostAllowed(url)) return res.status(403).json({ error: "Bu alan adı izinli değil." });
+
+    // HEAD ile meta al
+    const head = await fetch(url, { method: "HEAD" });
+    if (!head.ok) return res.status(400).json({ error: `Kaynağa erişilemedi: ${head.status}` });
+
+    const contentType = head.headers.get("content-type") || "application/octet-stream";
+
+    // Asıl indirme (stream forward)
+    const fileResp = await fetch(url);
+    if (!fileResp.ok) return res.status(400).json({ error: `İndirme hatası: ${fileResp.status}` });
+
+    // Dosya adı tahmini
+    const srcUrl = new URL(url);
+    const cd = fileResp.headers.get("content-disposition");
+    const guessedName = (cd && /filename=\"?([^\"]+)\"?/i.exec(cd)?.[1]) ||
+      srcUrl.pathname.split("/").pop() ||
+      "download";
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename=\"${guessedName}\"`);
+
+    fileResp.body.pipe(res);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Sunucu hatası." });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Downloader running on http://localhost:${PORT}`);
+  console.log("İzinli alan adları:", ALLOWLIST.join(", "));
+});
+```
+
+---
+
+## public/index.html
+```html
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Beyaz Listeli İndirici</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Dosya İndir (İzinli Alan Adları)</h1>
+    <p class="muted">Sadece izinli alan adlarından doğrudan dosya URL'lerini kabul eder. Akış (m3u8/DRM) desteklenmez.</p>
+
+    <div id="allowlist" class="allowlist"></div>
+
+    <form id="form" class="card">
+      <label for="url">İndirilecek dosya URL'si</label>
+      <input id="url" name="url" type="url" placeholder="https://archive.org/.../video.mp4" required />
+
+      <label class="checkbox">
+        <input id="attest" type="checkbox" required />
+        İndirme hakkım olduğunu onaylıyorum.
+      </label>
+
+      <button type="submit">İndir</button>
+      <div id="msg" class="msg" aria-live="polite"></div>
+    </form>
+
+    <footer class="muted">
+      <small>Yalnızca lisanslı/i̇zinli içerikler. Şikayet/Takedown için iletişim kanalı sağlayın.</small>
+    </footer>
+  </main>
+  <script src="/main.js" type="module"></script>
+</body>
+</html>
+```
+
+---
+
+## public/main.js
+```js
+async function fetchAllowlist() {
+  const el = document.getElementById("allowlist");
+  try {
+    const res = await fetch("/allowlist");
+    const data = await res.json();
+    el.textContent = `İzinli alan adları: ${data.allowlist.join(", ")}`;
+  } catch {
+    el.textContent = "İzinli alan adları yüklenemedi.";
+  }
+}
+
+async function handleSubmit(e) {
+  e.preventDefault();
+  const url = document.getElementById("url").value.trim();
+  const attest = document.getElementById("attest").checked;
+  const msg = document.getElementById("msg");
+
+  msg.textContent = "İşleniyor...";
+
+  try {
+    const res = await fetch("/download", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-rights-attestation": attest ? "true" : "false"
+      },
+      body: JSON.stringify({ url })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      msg.textContent = err.error || "Hata oluştu.";
+      return;
+    }
+
+    // Response bir akış olduğu için doğrudan link yaratıyoruz
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "attachment; filename=download";
+    const match = /filename=\"?([^\"]+)\"?/i.exec(cd);
+    const filename = match ? match[1] : "download";
+
+    const dlUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = dlUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(dlUrl);
+
+    msg.textContent = "İndirme başladı.";
+  } catch (e) {
+    console.error(e);
+    msg.textContent = "İndirme sırasında hata oluştu.";
+  }
+}
+
+fetchAllowlist();
+document.getElementById("form").addEventListener("submit", handleSubmit);
+```
+
+---
+
+## public/style.css
+```css
+:root { --bg:#0b1324; --card:#121b33; --text:#e8eefc; --muted:#9fb0d1; --accent:#8ab4ff; }
+*{ box-sizing:border-box; }
+body{ margin:0; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); }
+.container{ max-width:680px; margin:48px auto; padding:0 16px; }
+h1{ margin:0 0 8px; font-size:28px; }
+.muted{ color:var(--muted); }
+.allowlist{ margin:12px 0 20px; font-size:14px; color:var(--muted); }
+.card{ background:var(--card); padding:20px; border-radius:16px; box-shadow:0 6px 24px rgba(0,0,0,.25); display:grid; gap:12px; }
+label{ font-weight:600; }
+input[type=url]{ padding:12px; border-radius:12px; border:1px solid #2a3a63; outline:none; background:#0f1730; color:var(--text); }
+.checkbox{ display:flex; align-items:center; gap:8px; font-weight:500; }
+button{ padding:12px 16px; border:none; border-radius:12px; background:var(--accent); color:#001; font-weight:700; cursor:pointer; }
+button:hover{ filter:brightness(1.05); }
+.msg{ min-height:20px; font-size:14px; color:var(--muted); }
+```
+
+---
+
+## .env (opsiyonel)
+```env
+PORT=3000
+ALLOWLIST=archive.org,example.com,data.gov.tr
+```
+
+---
+
+## Çalıştırma
+```bash
+# 1) Proje klasörünü oluşturup dosyaları yerleştir
+npm install
+npm run start
+# Tarayıcı: http://localhost:3000
+```
+
+---
+
+## Notlar ve Genişletme Fikirleri
+- **Alan adı yönetimi**: /allowlist endpoint'i admin arayüzü ile güncellenebilir yap.
+- **Günlük/Kayıt**: Talepleri IP, zaman, URL, user-agent ve beyan ile logla (KVKK’ya uygun).
+- **Hız/Koşullar**: Captcha, ek oran sınırlama, dosya boyutu üst limiti (HEAD "content-length" ile kontrol) eklenebilir.
+- **Hata mesajları**: Kullanıcı dostu ve i18n desteği.
+- **Dağıtım**: Render/Railway/Fly.io gibi PaaS'lara tek tık. Node 18+ önerilir.
+- **Yasal metinler**: Kullanım şartları ve takedown e-postası için footer'a link ekle.
